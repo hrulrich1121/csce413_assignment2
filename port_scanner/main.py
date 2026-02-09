@@ -17,8 +17,10 @@ TODO for students:
 8. Add service fingerprinting
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import socket
 import sys
+import argparse
 
 
 def scan_port(target, port, timeout=1.0):
@@ -35,18 +37,32 @@ def scan_port(target, port, timeout=1.0):
     """
     try:
         # TODO: Create a socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         # TODO: Set timeout
+        s.settimeout(timeout)
         # TODO: Try to connect to target:port
+        result = s.connect_ex((target,port))
         # TODO: Close the socket
         # TODO: Return True if connection successful
+        if result == 0:
+            try:
+                s.send(b"\r\n")
+                banner = s.recv(1024).decode(errors="ignore").strip()
+                print(banner)
+            except:
+                banner = ""
+            return True
+        else:
+            pass
+        
+        s.close()
+        return False
 
-        pass  # Remove this and implement
-
-    except (socket.timeout, ConnectionRefusedError, OSError):
+    except (socket.timeout, OSError):
         return False
 
 
-def scan_range(target, start_port, end_port):
+def scan_range(target, start_port, end_port, max_threads=100, timeout=1.0):
     """
     Scan a range of ports on the target host
 
@@ -67,35 +83,91 @@ def scan_range(target, start_port, end_port):
     # Hint: Loop through port range and call scan_port()
     # Hint: Consider using threading for better performance
 
-    for port in range(start_port, end_port + 1):
-        # TODO: Scan this port
-        # TODO: If open, add to open_ports list
-        # TODO: Print progress (optional)
-        pass  # Remove this and implement
+    with ThreadPoolExecutor(max_workers=max_threads) as executor:
+        # Submit all port scan tasks
+        future_to_port = {
+            executor.submit(scan_port, target, port, timeout): port
+            for port in range(start_port, end_port + 1)
+        }
 
-    return open_ports
+        # Process results as they complete
+        for future in as_completed(future_to_port):
+            port = future_to_port[future]
+            try:
+                if future.result():
+                    print(f"[+] Port {port} is open")
+                    open_ports.append(port)
+            except Exception:
+                pass
+
+    return sorted(open_ports)
 
 
 def main():
     """Main function"""
-    # TODO: Parse command-line arguments
-    # TODO: Validate inputs
-    # TODO: Call scan_range()
-    # TODO: Display results
+    parser = argparse.ArgumentParser(
+        description="Simple Multi-threaded TCP Port Scanner"
+    )
 
-    # Example usage (you should improve this):
-    if len(sys.argv) < 2:
-        print("Usage: python3 port_scanner_template.py <target>")
-        print("Example: python3 port_scanner_template.py 172.20.0.10")
+    parser.add_argument(
+        "target",
+        help="Target IP address or hostname"
+    )
+
+    parser.add_argument(
+        "-p", "--ports",
+        help="Port range (format: start-end). Default: 1-1024",
+        default="1-1024"
+    )
+
+    parser.add_argument(
+        "-t", "--threads",
+        help="Number of threads (default: 100)",
+        type=int,
+        default=100
+    )
+
+    parser.add_argument(
+        "--timeout",
+        help="Socket timeout in seconds (default: 1.0)",
+        type=float,
+        default=1.0
+    )
+
+    args = parser.parse_args()
+
+    # Validate and parse port range
+    try:
+        start_port, end_port = map(int, args.ports.split("-"))
+        if not (0 < start_port <= end_port <= 65535):
+            raise ValueError
+    except ValueError:
+        print("[-] Invalid port range. Use format start-end (e.g., 20-80)")
         sys.exit(1)
 
-    target = sys.argv[1]
-    start_port = 1
-    end_port = 1024  # Scan first 1024 ports by default
+    # Validate thread count
+    if args.threads <= 0 or args.threads > 1000:
+        print("[-] Thread count must be between 1 and 1000")
+        sys.exit(1)
 
-    print(f"[*] Starting port scan on {target}")
+    # Validate target resolution
+    try:
+        target_ip = socket.gethostbyname(args.target)
+    except socket.gaierror:
+        print("[-] Could not resolve hostname.")
+        sys.exit(1)
 
-    open_ports = scan_range(target, start_port, end_port)
+
+    print(f"[*] Starting port scan on {target_ip}")
+
+    open_ports = scan_range(
+    target_ip,
+    start_port,
+    end_port,
+    max_threads=args.threads,
+    timeout=args.timeout
+)
+
 
     print(f"\n[+] Scan complete!")
     print(f"[+] Found {len(open_ports)} open ports:")
