@@ -94,6 +94,10 @@ def listen_for_knocks(sequence, window_seconds, protected_port):
 
                 if progress == len(sequence):
                     open_protected_port(ip, protected_port)
+
+                    time.sleep(30)
+                    close_protected_port(ip, protected_port)
+
                     progress = 0
                     start_time = now
             else:
